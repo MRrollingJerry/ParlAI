@@ -3,9 +3,13 @@ version: 2
 # -------------------------------------------------------------------------------------
 # environments where we run our jobs
 # -------------------------------------------------------------------------------------
-standard_cpu: &standard_cpu
+standard_cpu36: &standard_cpu36
   docker:
     - image: circleci/python:3.6.5-node
+
+standard_cpu35: &standard_cpu35
+  docker:
+    - image: circleci/python:3.5.7-node
 
 gpu: &gpu
   environment:
@@ -26,12 +30,24 @@ fixgit: &fixgit
     command: |
       ( [[ "$CIRCLE_BRANCH" != "master" ]] && git branch -f master origin/master ) || true
 
-setup: &setup
+setup36: &setup36
   run:
     name: Sets up the virtual environment
     command: |
       mkdir -p ~/venv
       virtualenv --python=python3.6 ~/venv
+      echo ". ~/venv/bin/activate" >> $BASH_ENV
+      . ~/venv/bin/activate
+      pip3 install --upgrade --progress-bar off pip
+      pip3 install --progress-bar off flake8 gitpython
+      python setup.py develop --no-deps
+
+setup35: &setup35
+  run:
+    name: Sets up the virtual environment
+    command: |
+      mkdir -p ~/venv
+      virtualenv --python=python3.5 ~/venv
       echo ". ~/venv/bin/activate" >> $BASH_ENV
       . ~/venv/bin/activate
       pip3 install --upgrade --progress-bar off pip
@@ -84,25 +100,38 @@ buildwebsite: &buildwebsite
 # -------------------------------------------------------------------------------------
 jobs:
   datatests:
-    <<: *standard_cpu
+    <<: *standard_cpu36
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup36
       - <<: *installdeps
       - <<: *installtorchcpu
       - run:
           name: Data tests
           command: python setup.py test -s tests.suites.datatests -v
 
-  unittests:
-    <<: *standard_cpu
+  unittests_36:
+    <<: *standard_cpu36
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup36
+      - <<: *installdeps
+      - <<: *installtorchcpu
+      - run:
+          name: Unit tests
+          command: python setup.py test -s tests.suites.unittests -v
+
+  unittests_35:
+    <<: *standard_cpu35
+    working_directory: ~/ParlAI
+    steps:
+      - checkout
+      - <<: *fixgit
+      - <<: *setup35
       - <<: *installdeps
       - <<: *installtorchcpu
       - run:
@@ -110,12 +139,12 @@ jobs:
           command: python setup.py test -s tests.suites.unittests -v
 
   lint:
-    <<: *standard_cpu
+    <<: *standard_cpu35
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup35
       - run:
           name: JS Lint
           working_directory: ~/ParlAI/parlai/mturk
@@ -134,7 +163,7 @@ jobs:
       - checkout
       - <<: *fixgit
       - <<: *setupcuda
-      - <<: *setup
+      - <<: *setup36
       - <<: *installdeps
       - <<: *installtorchgpu
       - run:
@@ -143,35 +172,35 @@ jobs:
           command: python setup.py test -s tests.suites.nightly_gpu -v
 
   mturk_tests:
-    <<: *standard_cpu
+    <<: *standard_cpu36
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup36
       - <<: *installdeps
       - run:
           name: All mturk tests
           command: python setup.py test -s tests.suites.mturk -v
 
   build_website:
-    <<: *standard_cpu
+    <<: *standard_cpu36
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup36
       - <<: *installdeps
       - <<: *installtorchcpu
       - <<: *buildwebsite
 
   deploy_website:
-    <<: *standard_cpu
+    <<: *standard_cpu36
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup36
       - <<: *installdeps
       - <<: *installtorchcpu
       - <<: *buildwebsite
@@ -185,7 +214,7 @@ jobs:
             s3cmd --access_key="${S3_ACCESS_KEY}" --secret_key="${S3_SECRET_KEY}" modify --add-header="Content-type:text/css" 's3://parl.ai/static/css/*' 's3://parl.ai/docs/_static/*.css' 's3://parl.ai/docs/_static/css/*.css'
 
   test_website:
-    <<: *standard_cpu
+    <<: *standard_cpu36
     working_directory: ~/
     steps:
       - run:
@@ -205,12 +234,12 @@ jobs:
             curl -f -i 'https://parl.ai/docs/_static/css/parlai_theme.css'
 
   check_extra_tests:
-    <<: *standard_cpu
+    <<: *standard_cpu36
     working_directory: ~/ParlAI
     steps:
       - checkout
       - <<: *fixgit
-      - <<: *setup
+      - <<: *setup36
       - run:
           name: "Conditionally launching long tests..."
           working_directory: ~/ParlAI/
@@ -235,7 +264,8 @@ workflows:
   commit:
     jobs:
       - lint
-      - unittests
+      - unittests_36
+      - unittests_35
       - mturk_tests:
           filters:
             branches:
@@ -264,7 +294,7 @@ workflows:
               only:
                 - master
     jobs:
-      - unittests
+      - unittests_36
       - mturk_tests
       - nightly_gpu_tests
       - test_website
